@@ -3,9 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile-coolify
-    args:
-        NODE_OPTIONS: "--max-old-space-size=6144"   # ↑ memória do build
-        PNPM_LOG_LEVEL: "debug"   
+      args:
+          NODE_OPTIONS: "--max-old-space-size=6144"   # ↑ memória do build
+          PNPM_LOG_LEVEL: "debug"   
     ports:
       - "3000:5173"
     environment:
