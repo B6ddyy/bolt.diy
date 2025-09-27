@@ -1,95 +1,47 @@
-ARG BASE=node:20.18.0
-FROM ${BASE} AS base
+FROM node:20-bookworm
 
 WORKDIR /app
 
-# Install dependencies (this step is cached as long as the dependencies don't change)
+# Habilita pnpm de forma estável
+ENV PNPM_HOME=/usr/local/share/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && corepack prepare pnpm@9.9.0 --activate
+
+# Toolchain para módulos nativos + git/CA
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Opcional: tornar o pnpm mais resiliente à rede
+RUN pnpm config set fetch-retries 5 \
+ && pnpm config set fetch-timeout 180000 \
+ && pnpm config set network-timeout 180000 \
+ && pnpm config set prefer-offline false \
+ && pnpm config set auto-install-peers true
+
+# (Sugestão) Não instalar wrangler global; use devDep + pnpm exec
+# Se quiser manter global, descomente a linha abaixo:
+# RUN npm i -g wrangler@4
+
+# Copia manifests primeiro (cache de deps)
 COPY package.json pnpm-lock.yaml ./
 
-#RUN npm install -g corepack@latest
+# Instala deps (sem travar no lock antigo)
+RUN pnpm install --no-frozen-lockfile --reporter=append --loglevel=info
 
-#RUN corepack enable pnpm && pnpm install
-RUN npm install -g pnpm && pnpm install
-
-# Copy the rest of your app's source code
+# Copia o restante do código
 COPY . .
 
-# Expose the port the app runs on
-EXPOSE 5173
+# Normaliza e dá permissão ao bindings.sh (se existir)
+RUN [ -f bindings.sh ] && tr -d '\r' < bindings.sh > bindings.tmp && mv bindings.tmp bindings.sh && chmod +x bindings.sh || true
 
-# Production image
-FROM base AS bolt-ai-production
-
-# Define environment variables with default values or let them be overridden
-ARG GROQ_API_KEY
-ARG HuggingFace_API_KEY
-ARG OPENAI_API_KEY
-ARG ANTHROPIC_API_KEY
-ARG OPEN_ROUTER_API_KEY
-ARG GOOGLE_GENERATIVE_AI_API_KEY
-ARG OLLAMA_API_BASE_URL
-ARG XAI_API_KEY
-ARG TOGETHER_API_KEY
-ARG TOGETHER_API_BASE_URL
-ARG AWS_BEDROCK_CONFIG
-ARG VITE_LOG_LEVEL=debug
-ARG DEFAULT_NUM_CTX
-
-ENV WRANGLER_SEND_METRICS=false \
-    GROQ_API_KEY=${GROQ_API_KEY} \
-    HuggingFace_KEY=${HuggingFace_API_KEY} \
-    OPENAI_API_KEY=${OPENAI_API_KEY} \
-    ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} \
-    OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY} \
-    GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY} \
-    OLLAMA_API_BASE_URL=${OLLAMA_API_BASE_URL} \
-    XAI_API_KEY=${XAI_API_KEY} \
-    TOGETHER_API_KEY=${TOGETHER_API_KEY} \
-    TOGETHER_API_BASE_URL=${TOGETHER_API_BASE_URL} \
-    AWS_BEDROCK_CONFIG=${AWS_BEDROCK_CONFIG} \
-    VITE_LOG_LEVEL=${VITE_LOG_LEVEL} \
-    DEFAULT_NUM_CTX=${DEFAULT_NUM_CTX}\
-    RUNNING_IN_DOCKER=true
-
-# Pre-configure wrangler to disable metrics
-RUN mkdir -p /root/.config/.wrangler && \
-    echo '{"enabled":false}' > /root/.config/.wrangler/metrics.json
-
+# Build do app (ajuste se seu script tiver outro nome)
 RUN pnpm run build
 
-CMD [ "pnpm", "run", "dockerstart"]
+EXPOSE 5173
 
-# Development image
-FROM base AS bolt-ai-development
-
-# Define the same environment variables for development
-ARG GROQ_API_KEY
-ARG HuggingFace 
-ARG OPENAI_API_KEY
-ARG ANTHROPIC_API_KEY
-ARG OPEN_ROUTER_API_KEY
-ARG GOOGLE_GENERATIVE_AI_API_KEY
-ARG OLLAMA_API_BASE_URL
-ARG XAI_API_KEY
-ARG TOGETHER_API_KEY
-ARG TOGETHER_API_BASE_URL
-ARG VITE_LOG_LEVEL=debug
-ARG DEFAULT_NUM_CTX
-
-ENV GROQ_API_KEY=${GROQ_API_KEY} \
-    HuggingFace_API_KEY=${HuggingFace_API_KEY} \
-    OPENAI_API_KEY=${OPENAI_API_KEY} \
-    ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} \
-    OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY} \
-    GOOGLE_GENERATIVE_AI_API_KEY=${GOOGLE_GENERATIVE_AI_API_KEY} \
-    OLLAMA_API_BASE_URL=${OLLAMA_API_BASE_URL} \
-    XAI_API_KEY=${XAI_API_KEY} \
-    TOGETHER_API_KEY=${TOGETHER_API_KEY} \
-    TOGETHER_API_BASE_URL=${TOGETHER_API_BASE_URL} \
-    AWS_BEDROCK_CONFIG=${AWS_BEDROCK_CONFIG} \
-    VITE_LOG_LEVEL=${VITE_LOG_LEVEL} \
-    DEFAULT_NUM_CTX=${DEFAULT_NUM_CTX}\
+ENV NODE_ENV=production \
     RUNNING_IN_DOCKER=true
 
-RUN mkdir -p ${WORKDIR}/run
-CMD pnpm run dev --host
+# Inicia com o script do package.json
+CMD ["pnpm","run","dockerstart"]
